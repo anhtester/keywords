@@ -24,8 +24,8 @@ import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.devtools.DevTools;
 import org.openqa.selenium.devtools.HasDevTools;
-import org.openqa.selenium.devtools.v138.network.Network;
-import org.openqa.selenium.devtools.v138.network.model.Headers;
+import org.openqa.selenium.devtools.v141.network.Network;
+import org.openqa.selenium.devtools.v141.network.model.Headers;
 import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.print.PrintOptions;
 import org.openqa.selenium.support.ui.ExpectedCondition;
@@ -370,7 +370,7 @@ public class WebUI {
       devTools.createSession();
 
       // Enable the Network domain of devtools
-      devTools.send(Network.enable(Optional.of(100000), Optional.of(100000), Optional.of(100000), Optional.of(false)));
+      devTools.send(Network.enable(Optional.of(100000), Optional.of(100000), Optional.of(100000), Optional.of(false), Optional.of(false)));
       String auth = username + ":" + password;
 
       // Encoding the username and password using Base64 (java.util)
