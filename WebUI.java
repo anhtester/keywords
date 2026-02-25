@@ -24,13 +24,15 @@ import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.devtools.DevTools;
 import org.openqa.selenium.devtools.HasDevTools;
-import org.openqa.selenium.devtools.v143.network.Network;
-import org.openqa.selenium.devtools.v143.network.model.Headers;
+import org.openqa.selenium.devtools.v145.network.Network;
+import org.openqa.selenium.devtools.v145.network.model.Headers;
 import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.print.PrintOptions;
 import org.openqa.selenium.support.ui.ExpectedCondition;
 import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.FluentWait;
 import org.openqa.selenium.support.ui.Select;
+import org.openqa.selenium.support.ui.Wait;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.testng.Assert;
 import org.testng.asserts.SoftAssert;
@@ -1298,31 +1300,32 @@ public class WebUI {
       return result;
    }
 
-   // Hàm kiểm tra sự tồn tại của phần tử với lặp lại nhiều lần
-   @Step("Check element exist {0} with retry {1} and timeout {2} ms")
+   // Hàm kiểm tra sự tồn tại của phần tử với lặp lại nhiều lần dùng FluentWait
+   @Step("Check element exist {0} with retry {1} times and wait time {2} ms")
    public static boolean checkElementExist(By by, int maxRetries, int waitTimeMillis) {
-      int retryCount = 0;
+      LogUtils.info("Kiểm tra tồn tại phần tử với retry: " + by);
 
-      while (retryCount < maxRetries) {
-         try {
-            WebElement element = getWebElement(by);
-            if (element != null) {
-               LogUtils.info("Tìm thấy phần tử ở lần thử thứ " + (retryCount + 1));
-               return true; // Phần tử được tìm thấy
-            }
-         } catch (NoSuchElementException e) {
-            LogUtils.info("Không tìm thấy phần tử. Thử lại lần " + (retryCount + 1));
-            retryCount++;
-            try {
-               Thread.sleep(waitTimeMillis); // Chờ trước khi thử lại
-            } catch (InterruptedException ie) {
-               ie.printStackTrace();
-            }
+      long totalTimeoutMillis = (long) maxRetries * waitTimeMillis;
+
+      try {
+         // FluentWait tương tự như vòng lặp của bạn nhưng hiệu quả hơn,
+         // không block thread của hệ thống bằng Thread.sleep().
+         Wait<WebDriver> wait = new FluentWait<>(DriverManager.getDriver())
+               .withTimeout(Duration.ofMillis(totalTimeoutMillis)) // Tổng thời gian chờ tối đa
+               .pollingEvery(Duration.ofMillis(waitTimeMillis)) // Tần suất lặp lại (Polling)
+               .ignoring(NoSuchElementException.class) // Tiếp tục lặp nếu không tìm thấy element
+               .ignoring(StaleElementReferenceException.class); // Tiếp tục lặp nếu element bị thay đổi
+
+         WebElement element = wait.until(ExpectedConditions.presenceOfElementLocated(by));
+
+         if (element != null) {
+            LogUtils.info("✅ Tồn tại phần tử: " + by);
+            return true;
          }
+      } catch (TimeoutException e) {
+         LogUtils.info("❌ Không tìm thấy phần tử sau " + maxRetries + " lần thử.");
+         return false;
       }
-
-      // Trả về false nếu không tìm thấy phần tử sau maxRetries lần
-      LogUtils.info("Không tìm thấy phần tử sau " + maxRetries + " lần thử.");
       return false;
    }
 
@@ -2206,6 +2209,19 @@ public class WebUI {
    }
 
    /**
+    * Scroll an element into the visible area of the browser window. (at CENTER)
+    *
+    * @param by Represent a web element as the By object
+    */
+   @Step("Scroll to element completely centered {0}")
+   public static void scrollToElementAtCenter(By by) {
+      smartWait();
+      JavascriptExecutor js = (JavascriptExecutor) DriverManager.getDriver();
+      js.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});", getWebElement(by));
+      LogUtils.info("Scroll to element completely centered: " + by);
+   }
+
+   /**
     * Scroll an element into the visible area of the browser window. (at BOTTOM)
     *
     * @param by Represent a web element as the By object
@@ -2227,6 +2243,19 @@ public class WebUI {
       JavascriptExecutor js = (JavascriptExecutor) DriverManager.getDriver();
       js.executeScript("arguments[0].scrollIntoView(true);", webElement);
       LogUtils.info("Scroll to element " + webElement);
+   }
+
+   /**
+    * Scroll an element into the visible area of the browser window. (at CENTER)
+    *
+    * @param webElement Represent a web element as the By object
+    */
+   @Step("Scroll to element completely centered {0}")
+   public static void scrollToElementAtCenter(WebElement webElement) {
+      smartWait();
+      JavascriptExecutor js = (JavascriptExecutor) DriverManager.getDriver();
+      js.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});", webElement);
+      LogUtils.info("Scroll to element completely centered: " + webElement);
    }
 
    /**
@@ -2978,26 +3007,23 @@ public class WebUI {
    /**
     * Wait until the given web element is visible within the timeout.
     *
-    * @param by     an element of object type By
-    * @param second maximum timeout as second
+    * @param by      an element of object type By
+    * @param timeout maximum timeout as second
     * @return a WebElement object ready to be visible
     */
-   public static WebElement waitForElementVisible(By by, int second) {
+   public static WebElement waitForElementVisible(By by, int timeout) {
       try {
-         WebDriverWait wait = new WebDriverWait(DriverManager.getDriver(), Duration.ofSeconds(second));
-
-         boolean check = isElementVisible(by, 1);
-         if (check) {
-            return wait.until(ExpectedConditions.visibilityOfElementLocated(by));
-         } else {
-            scrollToElementAtBottom(by);
-            return wait.until(ExpectedConditions.visibilityOfElementLocated(by));
-         }
+         WebDriverWait wait = new WebDriverWait(DriverManager.getDriver(), Duration.ofSeconds(timeout));
+         // Đợi đến khi element xuất hiện và hiển thị ra UI
+         WebElement element = wait.until(ExpectedConditions.visibilityOfElementLocated(by));
+         // Cuộn tới giữa màn hình một cách êm ái để chuẩn bị click/action (Tránh gắp trúng Menu Header che khuất)
+         scrollToElementAtCenter(element);
+         return element;
       } catch (Throwable error) {
          LogUtils.error("❌ Timeout waiting for the element Visible. " + by.toString());
          Assert.fail("❌ Timeout waiting for the element Visible. " + by.toString());
+         return null;
       }
-      return null;
    }
 
    /**
@@ -3007,25 +3033,18 @@ public class WebUI {
     * @return a WebElement object ready to be visible
     */
    public static WebElement waitForElementVisible(By by) {
-      waitForElementPresent(by);
-
       try {
          WebDriverWait wait = new WebDriverWait(DriverManager.getDriver(), Duration.ofSeconds(FrameworkConstants.WAIT_EXPLICIT));
-
-         boolean check = isElementVisible(by, 1);
-         if (check) {
-            return wait.until(ExpectedConditions.visibilityOfElementLocated(by));
-         } else {
-            scrollToElementAtBottom(by);
-            return wait.until(ExpectedConditions.visibilityOfElementLocated(by));
-         }
-
-         //return wait.until(ExpectedConditions.visibilityOfElementLocated(by));
+         // Đợi đến khi element xuất hiện và hiển thị ra UI
+         WebElement element = wait.until(ExpectedConditions.visibilityOfElementLocated(by));
+         // Cuộn tới giữa màn hình một cách êm ái để chuẩn bị click/action
+         scrollToElementAtCenter(element);
+         return element;
       } catch (Throwable error) {
          LogUtils.error("❌ Timeout waiting for the element Visible. " + by.toString());
          Assert.fail("❌ Timeout waiting for the element Visible. " + by.toString());
+         return null;
       }
-      return null;
    }
 
    /**
