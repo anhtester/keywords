@@ -35,6 +35,7 @@ import org.openqa.selenium.support.ui.Select;
 import org.openqa.selenium.support.ui.Wait;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.testng.Assert;
+import org.testng.SkipException;
 import org.testng.asserts.SoftAssert;
 
 import javax.annotation.Nullable;
@@ -89,6 +90,26 @@ public class WebUI {
     */
    public static void resetSoftAssert() {
       softAssert.remove();
+   }
+
+   /**
+    * Keywords based on java.awt.Robot press real keys / move the real mouse of the machine.
+    * They only make sense when the browser is visible on this machine's screen. In headless mode,
+    * on a remote Grid or without a display, the keys/mouse would go to another window of the user:
+    * the current test is SKIPPED instead.
+    *
+    * @param action name of the action, shown in the skip message
+    */
+   public static void requireVisibleDesktop(String action) {
+      boolean headlessBrowser = Boolean.parseBoolean(String.valueOf(FrameworkConstants.HEADLESS).trim());
+      boolean remote = "remote".equalsIgnoreCase(String.valueOf(FrameworkConstants.TARGET).trim());
+      if (headlessBrowser || remote || GraphicsEnvironment.isHeadless()) {
+         String message = action + " uses java.awt.Robot (real keyboard/mouse): it needs a visible local browser."
+                 + " Run with -DHEADLESS=false and TARGET=local. Current: HEADLESS=" + FrameworkConstants.HEADLESS
+                 + ", TARGET=" + FrameworkConstants.TARGET;
+         LogUtils.warn("SKIP: " + message);
+         throw new SkipException(message);
+      }
    }
 
    /**
@@ -374,6 +395,30 @@ public class WebUI {
    }
 
    /**
+    * Read the full path of the most recent download in chrome://downloads (Chrome/Edge).
+    * Uses the item data (Chrome 120+), then the old "#show" button title for older versions.
+    *
+    * @return the file path, or null when the list is empty or not readable
+    */
+   public static String getLastDownloadedFilePathWithJS() {
+      openWebsite("chrome://downloads");
+      String script = "const m = document.querySelector('downloads-manager');"
+              + "if (!m || !m.shadowRoot) return null;"
+              + "const item = m.shadowRoot.querySelector('#downloadsList downloads-item');"
+              + "if (!item) return null;"
+              + "if (item.data && item.data.filePath) return item.data.filePath;"
+              + "const show = item.shadowRoot && item.shadowRoot.querySelector('#show');"
+              + "return show ? show.getAttribute('title') : null;";
+      JavascriptExecutor js = (JavascriptExecutor) DriverManager.getDriver();
+      try {
+         // The list is rendered asynchronously: wait until the first item is available
+         return getWait(FrameworkConstants.WAIT_EXPLICIT).until(driver -> (String) js.executeScript(script));
+      } catch (TimeoutException e) {
+         return null;
+      }
+   }
+
+   /**
     * Verify the file is downloaded with JavascriptExecutor (EQUALS)
     *
     * @param fileName the specified file
@@ -381,13 +426,13 @@ public class WebUI {
     */
    @Step("Verify File Downloaded With JS [Equals]: {0}")
    public static boolean verifyFileDownloadedWithJS_Equals(String fileName) {
-      openWebsite("chrome://downloads");
-      sleep(3);
-      JavascriptExecutor js = (JavascriptExecutor) DriverManager.getDriver();
-      String element = (String) js.executeScript("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#show').getAttribute('title')");
+      String element = getLastDownloadedFilePathWithJS();
+      if (element == null) {
+         LogUtils.warn("No downloaded file found in chrome://downloads");
+         return false;
+      }
       File file = new File(element);
-      LogUtils.info(element);
-      LogUtils.info(file.getName());
+      LogUtils.info("Last downloaded file: " + element);
       if (file.exists() && file.getName().trim().equals(fileName)) {
          return true;
       } else {
@@ -403,13 +448,13 @@ public class WebUI {
     */
    @Step("Verify File Downloaded With JS [Contains]: {0}")
    public static boolean verifyFileDownloadedWithJS_Contains(String fileName) {
-      openWebsite("chrome://downloads");
-      sleep(3);
-      JavascriptExecutor js = (JavascriptExecutor) DriverManager.getDriver();
-      String element = (String) js.executeScript("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#show').getAttribute('title')");
+      String element = getLastDownloadedFilePathWithJS();
+      if (element == null) {
+         LogUtils.warn("No downloaded file found in chrome://downloads");
+         return false;
+      }
       File file = new File(element);
-      LogUtils.info(element);
-      LogUtils.info(file.getName());
+      LogUtils.info("Last downloaded file: " + element);
       if (file.exists() && file.getName().trim().contains(fileName)) {
          return true;
       } else {
@@ -539,11 +584,15 @@ public class WebUI {
     * @param elementName to name the .png image file
     */
    public static void screenshotElement(By by, String elementName) {
-      File scrFile = getWebElement(by).getScreenshotAs(OutputType.FILE);
+      // The element must be rendered (width/height > 0) and in the viewport before taking its screenshot
+      WebElement element = waitForElementVisible(by);
+      File scrFile = element.getScreenshotAs(OutputType.FILE);
+      File target = new File(SystemHelpers.getCurrentDir() + FrameworkConstants.EXPORT_CAPTURE_PATH, SystemHelpers.makeSlug(elementName) + ".png");
       try {
-         FileUtils.copyFile(scrFile, new File("./" + elementName + ".png"));
+         FileUtils.copyFile(scrFile, target);
+         LogUtils.info("Screenshot of element " + by + " saved: " + target.getPath());
       } catch (IOException e) {
-         throw new RuntimeException(e);
+         failStep("❌ Can not save the screenshot of element " + by + " to " + target.getPath(), e);
       }
    }
 
@@ -678,6 +727,7 @@ public class WebUI {
    @Step("Upload File with open Local Form")
    public static void uploadFileWithLocalForm(By by, String filePath) {
       smartWait();
+      requireVisibleDesktop("uploadFileWithLocalForm");
 
       Actions action = new Actions(DriverManager.getDriver());
       //Click to open form upload
@@ -2391,6 +2441,7 @@ public class WebUI {
    @Step("Drag HTML5 from element {0} to element {1}")
    public static boolean dragAndDropHTML5(By fromElement, By toElement) {
       smartWait();
+      requireVisibleDesktop("dragAndDropHTML5");
 
       try {
          Robot robot = new Robot();
@@ -2433,6 +2484,7 @@ public class WebUI {
    @Step("Drag from element {0} to X={1}, Y={2}")
    public static boolean dragAndDropToOffset(By fromElement, int X, int Y) {
       smartWait();
+      requireVisibleDesktop("dragAndDropToOffset");
 
       try {
          Robot robot = new Robot();
