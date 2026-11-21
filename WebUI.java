@@ -25,8 +25,7 @@ import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.devtools.DevTools;
 import org.openqa.selenium.devtools.HasDevTools;
-import org.openqa.selenium.devtools.v145.network.Network;
-import org.openqa.selenium.devtools.v145.network.model.Headers;
+import org.openqa.selenium.devtools.Command;
 import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.print.PrintOptions;
 import org.openqa.selenium.support.ui.ExpectedCondition;
@@ -419,36 +418,43 @@ public class WebUI {
    }
 
    /**
-    * Login as Authentication on URL
+    * Login as Basic Authentication on URL (Chrome/Edge, through Chrome DevTools Protocol).
+    * <p>
+    * The CDP commands are sent by name (Network.enable, Network.setExtraHTTPHeaders), so this method does not depend
+    * on a version-specific package org.openqa.selenium.devtools.vNNN and keeps working after a Selenium upgrade.
     *
-    * @param url
-    * @param username
-    * @param password
+    * @param url      the URL to open
+    * @param username the username
+    * @param password the password (masked in logs)
     */
    @Step("Get to URL {0} with authentication")
    public static void getToUrlAuthentication(String url, String username, String password) {
+      WebDriver driver = DriverManager.getDriver();
+      if (!(driver instanceof HasDevTools)) {
+         failStep("❌ getToUrlAuthentication needs a Chromium browser (Chrome/Edge) with DevTools support. Current: " + DriverManager.getInfo(), null);
+      }
       // Get the devtools from the running drivers and create a session
-      DevTools devTools = ((HasDevTools) DriverManager.getDriver()).getDevTools();
-      devTools.createSession();
+      DevTools devTools = ((HasDevTools) driver).getDevTools();
+      devTools.createSessionIfThereIsNotOne();
 
       // Enable the Network domain of devtools
-      devTools.send(Network.enable(Optional.of(100000), Optional.of(100000), Optional.of(100000), Optional.of(false), Optional.of(false)));
-      String auth = username + ":" + password;
+      devTools.send(new Command<Void>("Network.enable", Map.of()));
 
       // Encoding the username and password using Base64 (java.util)
-      String encodeToString = Base64.getEncoder().encodeToString(auth.getBytes());
+      String auth = username + ":" + password;
+      String encodeToString = Base64.getEncoder().encodeToString(auth.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
       // Pass the network header -> Authorization : Basic <encoded String>
       Map<String, Object> headers = new HashMap<>();
       headers.put("Authorization", "Basic " + encodeToString);
-      devTools.send(Network.setExtraHTTPHeaders(new Headers(headers)));
+      devTools.send(new Command<Void>("Network.setExtraHTTPHeaders", Map.of("headers", headers)));
 
       LogUtils.info("getToUrlAuthentication with URL: " + url);
       LogUtils.info("getToUrlAuthentication with Username: " + username);
-      LogUtils.info("getToUrlAuthentication with Password: " + password);
+      LogUtils.info("getToUrlAuthentication with Password: " + MaskUtils.MASK);
       // Load the application url
       openWebsite(url);
-      sleep(3);
+      waitForPageLoaded();
    }
 
    //Handle HTML5 validation message and valid value
